@@ -1,15 +1,17 @@
 from itertools import permutations
 import os
+import ast
+import sys
 import json
 from nltk import wordpunct_tokenize
 from string import punctuation
+import pandas as pd
 
 
 class Search:
-    def __init__(self, text_fields, url_field, punct, ext=".json"):
+    def __init__(self, text_fields, url_field, punct):
         self.punct = punct
         self.text_fields = text_fields
-        self.ext = ext
         self.url_field = url_field
 
     def check_dir(self, name: str, files_arr: list):
@@ -19,13 +21,19 @@ class Search:
             for file in os.listdir(name):
                 self.check_dir(os.path.join(name, file), files_arr)
 
-    def load_files(self, path):
+    def load_files(self, path, ext=".json"):
         files = list()
         self.check_dir(path, files)
-        valid_ext_files = [f for f in files if os.path.splitext(f)[1] == self.ext]
+        valid_ext_files = [f for f in files if os.path.splitext(f)[1] == ext]
         return valid_ext_files
 
     def file_parser(self, filename, queries):
+        """
+        Search for urls in a file
+        :param filename:
+        :param queries:
+        :return:
+        """
         with open(filename, "rb") as f:
             content = json.load(f)
         url = None
@@ -47,6 +55,12 @@ class Search:
         return url
 
     def dir_parser(self, path, queries):
+        """
+        Search for urls in a directory
+        :param path:
+        :param queries:
+        :return:
+        """
         files = self.load_files(path)
         resp_urls = []
         for file in files:
@@ -59,7 +73,7 @@ class Search:
                 resp_urls.append(found_url)
         return resp_urls
 
-    def search(self, path, query):
+    def search(self, query, path):
         query = query.lower()
         query_words = wordpunct_tokenize(query)
         query_words = [word for word in query_words if word not in self.punct]
@@ -68,8 +82,36 @@ class Search:
         urls = self.dir_parser(path, possible_queries)
         return urls
 
+    def predict_from_csv(self, search_path, csv_file, field, out_csv):
+        df = pd.read_csv(csv_file)
+        columns = list(df.columns)
+        df["URLS"] = df[field].apply(self.search, args=(search_path, ))
+        df["Count of pages"] = df["URLS"].apply(len)
+        columns.extend(["Count of pages", "URLS"])
+        df = df.reindex(columns=columns)
+        df.to_csv(out_csv, index=False)
+
+    def predict_from_dir(self, input_dir, search_path, text_field, ext):
+        files = self.load_files(input_dir, ext=ext)
+        if ext == ".csv":
+            for file in files:
+                if "_edited" not in file:
+                    out_filename = os.path.splitext(file)[0] + "_edited" + ".csv"
+                    self.predict_from_csv(search_path, file, text_field, out_filename)
+
 
 if __name__ == "__main__":
+    # parameters for search
     search = Search(text_fields=["article"], url_field="url", punct=punctuation)
-    urls = search.search("/root/nlp/crosslinks/data/pages", "Quasi als Zweitausgabe")
-    print(urls)
+    # urls = search.search("/root/nlp/crosslinks/data/pages", "Quasi als Zweitausgabe")
+    args = sys.argv
+    if len(args[:-1]) != 2:
+        exit("usage: python3 search.py csv_dir search_path")
+    in_dir = args[1]
+    s_path = args[2]
+    search.predict_from_dir(input_dir=in_dir, search_path=s_path, text_field="Word", ext=".csv")
+
+
+
+
+
